@@ -1,0 +1,23 @@
+{
+  "name": "ai-financial-advisor",
+  "version": "1.0.0",
+  "description": "AI-powered financial advisor with Plaid integration",
+  "main": "server/index.js",
+  "type": "module",
+  "scripts": {
+    "dev:server": "node server/index.js",
+    "dev:client": "cd client && npm run dev",
+    "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
+    "install:all": "npm install && cd client && npm install",
+    "build": "npm install && cd client && npm install && npm run build",
+    "start": "node server/index.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "openai": "^4.77.0",
+    "plaid": "^28.0.0",
+    "concurrently": "^9.1.0"
+  }
+}
