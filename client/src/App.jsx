@@ -4,9 +4,11 @@ import Dashboard from './pages/Dashboard';
 import Accounts from './pages/Accounts';
 import Transactions from './pages/Transactions';
 import Advisor from './pages/Advisor';
-import PlaidLink from './components/PlaidLink';
 
 const API_BASE = '/api';
+
+const DEFAULT_MESSAGE_CONNECTED = "Hello! I'm your AI financial advisor. I have access to your connected accounts and transaction history, so I can give you personalized advice. What would you like to know about your finances?";
+const DEFAULT_MESSAGE_DISCONNECTED = "Hello! I'm your AI financial advisor. Connect your bank accounts using the sidebar to get personalized financial advice based on your real data. In the meantime, I can answer general financial questions!";
 
 export default function App() {
   const [activePage, setActivePage] = useState('dashboard');
@@ -18,6 +20,21 @@ export default function App() {
   const [insights, setInsights] = useState([]);
   const [loading, setLoading] = useState(false);
   const [connected, setConnected] = useState(false);
+
+  // Chat state lifted here so it persists across tab switches
+  const [chatMessages, setChatMessages] = useState([
+    { role: 'assistant', content: DEFAULT_MESSAGE_DISCONNECTED },
+  ]);
+  const [selectedModel, setSelectedModel] = useState('gpt-5.2');
+
+  const resetChat = useCallback(() => {
+    setChatMessages([
+      {
+        role: 'assistant',
+        content: connected ? DEFAULT_MESSAGE_CONNECTED : DEFAULT_MESSAGE_DISCONNECTED,
+      },
+    ]);
+  }, [connected]);
 
   const fetchFinancialData = useCallback(async () => {
     try {
@@ -109,7 +126,16 @@ export default function App() {
           />
         );
       case 'advisor':
-        return <Advisor connected={connected} />;
+        return (
+          <Advisor
+            connected={connected}
+            messages={chatMessages}
+            setMessages={setChatMessages}
+            selectedModel={selectedModel}
+            setSelectedModel={setSelectedModel}
+            onReset={resetChat}
+          />
+        );
       default:
         return null;
     }

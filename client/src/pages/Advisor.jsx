@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Send, Bot, User, Sparkles } from 'lucide-react';
+import { Send, Bot, User, Sparkles, RotateCcw, ChevronDown } from 'lucide-react';
 
 const SUGGESTIONS = [
   'How is my financial health overall?',
@@ -10,23 +10,34 @@ const SUGGESTIONS = [
   'Analyze my spending patterns',
 ];
 
-export default function Advisor({ connected }) {
-  const [messages, setMessages] = useState([
-    {
-      role: 'assistant',
-      content: connected
-        ? "Hello! I'm your AI financial advisor. I have access to your connected accounts and transaction history, so I can give you personalized advice. What would you like to know about your finances?"
-        : "Hello! I'm your AI financial advisor. Connect your bank accounts using the sidebar to get personalized financial advice based on your real data. In the meantime, I can answer general financial questions!",
-    },
-  ]);
+const MODELS = [
+  { id: 'gpt-5.2', name: 'GPT-5.2', desc: 'Latest flagship' },
+  { id: 'gpt-5-mini', name: 'GPT-5 Mini', desc: 'Fast & capable' },
+  { id: 'gpt-5-nano', name: 'GPT-5 Nano', desc: 'Lightweight & efficient' },
+];
+
+export default function Advisor({ connected, messages, setMessages, selectedModel, setSelectedModel, onReset }) {
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const [showModelPicker, setShowModelPicker] = useState(false);
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
+  const modelPickerRef = useRef(null);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  // Close model picker on outside click
+  useEffect(() => {
+    const handleClick = (e) => {
+      if (modelPickerRef.current && !modelPickerRef.current.contains(e.target)) {
+        setShowModelPicker(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, []);
 
   const sendMessage = async (text) => {
     const userMessage = text || input.trim();
@@ -43,6 +54,7 @@ export default function Advisor({ connected }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           messages: newMessages.map(m => ({ role: m.role, content: m.content })),
+          model: selectedModel,
         }),
       });
 
@@ -74,20 +86,79 @@ export default function Advisor({ connected }) {
     }
   };
 
+  const currentModel = MODELS.find(m => m.id === selectedModel) || MODELS[0];
+
   return (
     <div>
       <div className="page-header">
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <div style={{
-            width: 40, height: 40, borderRadius: 'var(--radius-sm)',
-            background: 'var(--gradient-primary)', display: 'flex',
-            alignItems: 'center', justifyContent: 'center',
-          }}>
-            <Sparkles size={20} color="white" />
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div style={{
+              width: 40, height: 40, borderRadius: 'var(--radius-sm)',
+              background: 'var(--gradient-primary)', display: 'flex',
+              alignItems: 'center', justifyContent: 'center',
+            }}>
+              <Sparkles size={20} color="white" />
+            </div>
+            <div>
+              <h2>AI Financial Advisor</h2>
+              <p>Personalized advice powered by your financial data</p>
+            </div>
           </div>
-          <div>
-            <h2>AI Financial Advisor</h2>
-            <p>Personalized advice powered by your financial data</p>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            {/* Model Picker */}
+            <div ref={modelPickerRef} style={{ position: 'relative' }}>
+              <button
+                className="btn btn-secondary btn-sm"
+                onClick={() => setShowModelPicker(prev => !prev)}
+                style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+              >
+                <Bot size={14} />
+                {currentModel.name}
+                <ChevronDown size={14} />
+              </button>
+              {showModelPicker && (
+                <div style={{
+                  position: 'absolute', top: '100%', right: 0, marginTop: 6,
+                  background: 'var(--bg-card)', border: '1px solid var(--border)',
+                  borderRadius: 'var(--radius-md)', padding: 6, minWidth: 220,
+                  boxShadow: 'var(--shadow-lg)', zIndex: 50,
+                }}>
+                  {MODELS.map(model => (
+                    <button
+                      key={model.id}
+                      onClick={() => { setSelectedModel(model.id); setShowModelPicker(false); }}
+                      style={{
+                        display: 'flex', flexDirection: 'column', width: '100%',
+                        padding: '10px 12px', background: model.id === selectedModel ? 'var(--accent-light)' : 'transparent',
+                        border: 'none', borderRadius: 'var(--radius-sm)', cursor: 'pointer',
+                        textAlign: 'left', transition: 'background 0.15s',
+                      }}
+                      onMouseEnter={e => { if (model.id !== selectedModel) e.currentTarget.style.background = 'var(--bg-card-hover)'; }}
+                      onMouseLeave={e => { if (model.id !== selectedModel) e.currentTarget.style.background = 'transparent'; }}
+                    >
+                      <span style={{
+                        fontSize: 13, fontWeight: 600,
+                        color: model.id === selectedModel ? 'var(--accent)' : 'var(--text-primary)',
+                      }}>
+                        {model.name}
+                      </span>
+                      <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{model.desc}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            {/* Reset Chat */}
+            <button
+              className="btn btn-secondary btn-sm"
+              onClick={onReset}
+              title="Reset chat"
+              style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+            >
+              <RotateCcw size={14} />
+              New Chat
+            </button>
           </div>
         </div>
       </div>
@@ -138,6 +209,11 @@ export default function Advisor({ connected }) {
         )}
 
         <div className="chat-input-area">
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+            <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+              Using {currentModel.name} &middot; {currentModel.desc}
+            </span>
+          </div>
           <div className="chat-input-wrapper">
             <textarea
               ref={inputRef}
@@ -169,7 +245,6 @@ function FormattedMessage({ content }) {
 
   const lines = content.split('\n');
   const elements = [];
-  let inList = false;
   let listItems = [];
 
   const flushList = () => {
@@ -180,7 +255,6 @@ function FormattedMessage({ content }) {
         </ul>
       );
       listItems = [];
-      inList = false;
     }
   };
 
@@ -188,7 +262,6 @@ function FormattedMessage({ content }) {
     const trimmed = line.trim();
 
     if (trimmed.startsWith('- ') || trimmed.startsWith('* ') || /^\d+\.\s/.test(trimmed)) {
-      inList = true;
       const text = trimmed.replace(/^[-*]\s|^\d+\.\s/, '');
       listItems.push(formatInline(text));
     } else {
@@ -212,7 +285,6 @@ function FormattedMessage({ content }) {
 }
 
 function formatInline(text) {
-  // Bold: **text**
   const parts = text.split(/(\*\*[^*]+\*\*)/g);
   return parts.map((part, i) => {
     if (part.startsWith('**') && part.endsWith('**')) {

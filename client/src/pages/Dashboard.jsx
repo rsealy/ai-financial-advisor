@@ -156,7 +156,7 @@ export default function Dashboard({ financialData, insights, connected, onConnec
           <div className="card-header" style={{ marginBottom: 16 }}>
             <h3>AI Insights</h3>
             <span className="badge" style={{ background: 'var(--accent-light)', color: 'var(--accent)' }}>
-              Powered by GPT-4
+              AI-Powered
             </span>
           </div>
           <div className="insights-grid">

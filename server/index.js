@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { Configuration, PlaidApi, PlaidEnvironments, Products, CountryCode } from 'plaid';
 import OpenAI from 'openai';
@@ -30,8 +31,31 @@ const plaidClient = new PlaidApi(plaidConfig);
 // ── OpenAI Setup ─────────────────────────────────────────────────────────────
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-// In-memory store (per session — production would use a database)
-let accessTokens = [];
+// ── Persistent Token Storage ─────────────────────────────────────────────────
+const DATA_FILE = path.join(__dirname, '..', '.session-data.json');
+
+function loadPersistedTokens() {
+  try {
+    if (fs.existsSync(DATA_FILE)) {
+      const data = JSON.parse(fs.readFileSync(DATA_FILE, 'utf-8'));
+      console.log(`Loaded ${data.accessTokens?.length || 0} saved access token(s)`);
+      return data.accessTokens || [];
+    }
+  } catch (err) {
+    console.error('Failed to load persisted tokens:', err.message);
+  }
+  return [];
+}
+
+function saveTokens() {
+  try {
+    fs.writeFileSync(DATA_FILE, JSON.stringify({ accessTokens }, null, 2));
+  } catch (err) {
+    console.error('Failed to save tokens:', err.message);
+  }
+}
+
+let accessTokens = loadPersistedTokens();
 let financialData = {
   accounts: [],
   transactions: [],
@@ -65,6 +89,7 @@ app.post('/api/plaid/exchange-token', async (req, res) => {
     const response = await plaidClient.itemPublicTokenExchange({ public_token });
     const accessToken = response.data.access_token;
     accessTokens.push(accessToken);
+    saveTokens();
 
     // Immediately fetch data for this new connection
     await fetchAllFinancialData();
@@ -206,9 +231,21 @@ ${recentTxnList || 'No recent transactions'}
 `.trim();
 }
 
+// Available models endpoint
+const AVAILABLE_MODELS = [
+  { id: 'gpt-5.2', name: 'GPT-5.2', description: 'Latest flagship model' },
+  { id: 'gpt-5-mini', name: 'GPT-5 Mini', description: 'Fast and capable' },
+  { id: 'gpt-5-nano', name: 'GPT-5 Nano', description: 'Lightweight and efficient' },
+];
+
+app.get('/api/advisor/models', (req, res) => {
+  res.json({ models: AVAILABLE_MODELS });
+});
+
 app.post('/api/advisor/chat', async (req, res) => {
   try {
-    const { messages } = req.body;
+    const { messages, model } = req.body;
+    const selectedModel = model || 'gpt-5.2';
     const financialContext = buildFinancialContext();
 
     const systemMessage = {
@@ -230,14 +267,38 @@ Guidelines:
 - Keep responses concise but thorough`
     };
 
-    const response = await openai.chat.completions.create({
-      model: 'gpt-4o',
-      messages: [systemMessage, ...messages],
-      temperature: 0.7,
-      max_tokens: 1000,
-    });
+    // Try selected model, fall back through alternatives if empty response
+    const fallbackModels = [selectedModel];
+    if (!fallbackModels.includes('gpt-4o')) fallbackModels.push('gpt-4o');
 
-    res.json({ message: response.choices[0].message });
+    let reply = null;
+    for (const model of fallbackModels) {
+      try {
+        const isGpt5 = model.startsWith('gpt-5');
+        const response = await openai.chat.completions.create({
+          model,
+          messages: [systemMessage, ...messages],
+          ...(isGpt5 ? { max_completion_tokens: 1000 } : { temperature: 0.7, max_tokens: 1000 }),
+        });
+
+        const content = response.choices[0].message.content;
+        if (content && content.trim().length > 0) {
+          reply = response.choices[0].message;
+          console.log(`Chat responded with ${model} (${content.length} chars)`);
+          break;
+        } else {
+          console.log(`Empty response from ${model}, trying next...`);
+        }
+      } catch (err) {
+        console.error(`Chat failed with ${model}:`, err.message);
+      }
+    }
+
+    if (reply) {
+      res.json({ message: reply });
+    } else {
+      res.json({ message: { role: 'assistant', content: 'Sorry, I was unable to generate a response. Please try again.' } });
+    }
   } catch (error) {
     console.error('AI Error:', error.message);
     res.status(500).json({ error: 'Failed to get AI response' });
@@ -253,42 +314,51 @@ app.get('/api/advisor/insights', async (req, res) => {
       return res.json({ insights: [] });
     }
 
-    const response = await openai.chat.completions.create({
-      model: 'gpt-4o',
-      messages: [
-        {
-          role: 'system',
-          content: `You are an expert financial advisor. Analyze the following financial data and provide exactly 4 brief, actionable insights. Each insight should be a JSON object with "title" (short heading), "description" (1-2 sentences), and "type" (one of: "warning", "tip", "positive", "action").
+    // Try models in order of preference until one works
+    const insightModels = ['gpt-5.2', 'gpt-5-mini', 'gpt-4o-mini'];
+    let insights = null;
+
+    for (const model of insightModels) {
+      try {
+        const isGpt5 = model.startsWith('gpt-5');
+        const response = await openai.chat.completions.create({
+          model,
+          messages: [
+            {
+              role: 'system',
+              content: `You are an expert financial advisor. Analyze the following financial data and provide exactly 4 brief, actionable insights. Each insight should be a JSON object with "title" (short heading), "description" (1-2 sentences), and "type" (one of: "warning", "tip", "positive", "action").
 
 Return ONLY a valid JSON array, no markdown or other text.
 
 Financial Data:
 ${financialContext}`
-        },
-        {
-          role: 'user',
-          content: 'Provide 4 proactive financial insights based on my data.'
-        }
-      ],
-      model: 'gpt-4o',
-      temperature: 0.7,
-      max_tokens: 800,
-    });
+            },
+            {
+              role: 'user',
+              content: 'Provide 4 proactive financial insights based on my data.'
+            }
+          ],
+          ...(isGpt5 ? { max_completion_tokens: 800 } : { temperature: 0.7, max_tokens: 800 }),
+        });
 
-    let insights;
-    try {
-      const content = response.choices[0].message.content.replace(/```json\n?|\n?```/g, '').trim();
-      insights = JSON.parse(content);
-    } catch {
-      insights = [
-        { title: 'Connect Your Accounts', description: 'Link your bank accounts to get personalized financial insights.', type: 'action' }
-      ];
+        let content = response.choices[0].message.content || '';
+        console.log(`Insights response (${model}):`, content.substring(0, 200));
+        content = content.replace(/```json\n?/g, '').replace(/```/g, '').trim();
+        const arrayMatch = content.match(/\[[\s\S]*\]/);
+        if (arrayMatch) {
+          insights = JSON.parse(arrayMatch[0]);
+          console.log(`Insights generated successfully with ${model}`);
+          break;
+        }
+      } catch (err) {
+        console.error(`Insights failed with ${model}:`, err.message);
+      }
     }
 
-    res.json({ insights });
+    res.json({ insights: insights || [] });
   } catch (error) {
     console.error('Insights error:', error.message);
-    res.status(500).json({ error: 'Failed to generate insights' });
+    res.json({ insights: [] });
   }
 });
 
@@ -301,6 +371,12 @@ app.get('*', (req, res) => {
 
 // ── Start Server ─────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 5001;
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log(`Server running on http://localhost:${PORT}`);
+  // Auto-fetch financial data if we have saved tokens
+  if (accessTokens.length > 0) {
+    console.log('Restoring financial data from saved session...');
+    await fetchAllFinancialData();
+    console.log(`Restored ${financialData.accounts.length} account(s), ${financialData.transactions.length} transaction(s)`);
+  }
 });
